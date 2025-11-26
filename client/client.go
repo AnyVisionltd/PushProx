@@ -29,32 +29,29 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/prometheus-community/pushprox/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
-	scrapeErrorCounter = prometheus.NewCounter(
+	scrapeErrorCounter = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "pushprox_client_scrape_errors_total",
 			Help: "Number of scrape errors",
 		},
 	)
-	pushErrorCounter = prometheus.NewCounter(
+	pushErrorCounter = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "pushprox_client_push_errors_total",
 			Help: "Number of push errors",
 		},
 	)
-	pollErrorCounter = prometheus.NewCounter(
+	pollErrorCounter = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "pushprox_client_poll_errors_total",
 			Help: "Number of poll errors",
 		},
 	)
 )
-
-func init() {
-	prometheus.MustRegister(pushErrorCounter, pollErrorCounter, scrapeErrorCounter)
-}
 
 func DefaultBackoff() backoff.BackOff {
 	b := backoff.NewExponentialBackOff()
