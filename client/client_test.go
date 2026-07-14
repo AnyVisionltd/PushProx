@@ -14,11 +14,14 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/common/promslog"
@@ -62,5 +65,65 @@ func TestLoop(t *testing.T) {
 	defer ts.Close()
 	if err := c.doPoll(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDoPollRejectsNonOKResponseBeforeParsing(t *testing.T) {
+	const responseBody = `{"message":"Service Unavailable"}`
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, responseBody)
+	}))
+	defer ts.Close()
+
+	var logs bytes.Buffer
+	c, err := NewCoordinator(slog.New(slog.NewTextHandler(&logs, nil)), nil, ts.Client(), "test.example", ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = c.doPoll(context.Background())
+	if err == nil {
+		t.Fatal("doPoll() returned nil error for a non-200 response")
+	}
+	if got, want := err.Error(), `poll returned HTTP 503: {"message":"Service Unavailable"}`; got != want {
+		t.Fatalf("doPoll() error = %q, want %q", got, want)
+	}
+	if got := logs.String(); !strings.Contains(got, "Poll request rejected by proxy") ||
+		!strings.Contains(got, "status=503") ||
+		!strings.Contains(got, `body="{\"message\":\"Service Unavailable\"}"`) {
+		t.Fatalf("doPoll() log does not contain the response status and body: %s", got)
+	}
+	if got := logs.String(); strings.Contains(got, "Error reading request") || strings.Contains(got, "malformed HTTP request") {
+		t.Fatalf("doPoll() attempted to parse a non-200 response as an HTTP request: %s", got)
+	}
+}
+
+func TestDoPollTruncatesRejectedResponseBody(t *testing.T) {
+	const maxBodySnippetLength = 512
+	responseBody := strings.Repeat("a", maxBodySnippetLength) + "not-included"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, responseBody)
+	}))
+	defer ts.Close()
+
+	var logs bytes.Buffer
+	c, err := NewCoordinator(slog.New(slog.NewTextHandler(&logs, nil)), nil, ts.Client(), "test.example", ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = c.doPoll(context.Background())
+	if err == nil {
+		t.Fatal("doPoll() returned nil error for a non-200 response")
+	}
+	if got := err.Error(); got != "poll returned HTTP 403: "+strings.Repeat("a", maxBodySnippetLength) {
+		t.Fatalf("doPoll() returned an unexpected truncated body: %q", got)
+	}
+	if strings.Contains(logs.String(), "not-included") {
+		t.Fatalf("doPoll() logged more than %d response-body bytes: %s", maxBodySnippetLength, logs.String())
 	}
 }

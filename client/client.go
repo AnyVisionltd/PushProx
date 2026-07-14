@@ -205,6 +205,12 @@ func (c *Coordinator) doPoll(ctx context.Context) error {
 		return fmt.Errorf("error polling: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		bodySnippet := strings.TrimSpace(string(body))
+		c.logger.Error("Poll request rejected by proxy", "status", resp.StatusCode, "body", bodySnippet)
+		return fmt.Errorf("poll returned HTTP %d: %s", resp.StatusCode, bodySnippet)
+	}
 
 	request, err := http.ReadRequest(bufio.NewReader(resp.Body))
 	if err != nil {
